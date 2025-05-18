@@ -159,6 +159,6 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          commit_sha: ${{ inputs.ref }}
+          commit_sha: ${{ steps.image_tag.outputs.commit_hash }}
           custom_tag: ${{ env.TAG }}
           tag_prefix: ""
