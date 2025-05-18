@@ -1,0 +1,44 @@
+name: Build
+description: Build service
+inputs:
+  for_release:
+    description: "Whether to build for release"
+    required: false
+    default: "false"
+  service_dir:
+    description: "Relative path to the service directory"
+    required: false
+  service_name:
+    description: "The name of the service"
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up toolchain
+      shell: bash
+      run: echo "Setting up toolchain (replace with your own command here)";
+      # Replace with the toolchain you need for your project
+      # Example for simple Go project:
+      # uses: actions/setup-go@v5
+      # with:
+      #   go-version: "1.22"
+
+    # Install dependencies
+    - name: Install dependencies
+      shell: bash
+      run: echo "Installing dependencies (replace with your own command here)";
+      # Replace with the command you need to install your dependencies
+      # Example for simple Go project:
+      # run: |
+      #   go mod tidy
+      #   go get .
+
+    # Build
+    - name: Build
+      shell: bash
+      run: echo "Building (replace with your own command here)";
+      # Replace with the command you need to build your project
+      # Example for simple Go project:
+      # run: go build -v ./...

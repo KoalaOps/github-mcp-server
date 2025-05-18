@@ -1,0 +1,58 @@
+name: Configure GitHub Authentication
+description: >
+  Determines the authentication type, generates a GitHub App token when required.
+inputs:
+  GHA_PAT:
+    description: "Personal Access Token for GitHub"
+    required: false
+  GH_APP_PK:
+    description: "GitHub App private key"
+    required: false
+  GH_APP_ID:
+    description: "GitHub App ID"
+    required: false
+runs:
+  using: "composite"
+  steps:
+    # The default GitHub Actions token is only valid for the same repo from which this workflow is triggered.
+    # The supported options are PAT and GitHub App, and the choice depends on the organization secrets provided to the workflow.
+    - name: Determine auth type
+      shell: bash
+      id: determine_auth_type
+      run: |
+        if [ -n "${{ inputs.GHA_PAT }}" ]; then
+          echo "GITHUB_TOKEN_TYPE=gh_pat" >> $GITHUB_ENV
+        elif [ -n "${{ inputs.GH_APP_PK }}" ] && [ -n "${{ inputs.GH_APP_ID }}" ]; then
+          echo "GITHUB_TOKEN_TYPE=gh_app" >> $GITHUB_ENV
+        else
+          echo "Error: Missing authentication secrets: either GHA_PAT or both GH_APP_PK and GH_APP_ID"
+        fi
+
+     # If token type is GitHub App, generate a GitHub App token.
+    - name: Generate GitHub App token
+      id: create_github_app_token
+      uses: actions/create-github-app-token@v1
+      if: ${{ env.GITHUB_TOKEN_TYPE == 'gh_app' }}
+      with:
+        owner: ${{ github.repository_owner }}
+        app-id: ${{ inputs.GH_APP_ID }}
+        private-key: ${{ inputs.GH_APP_PK }}
+
+    - name: Set access token
+      id: set_access_token
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.GHA_PAT }}" ]; then
+          echo "token=${{ inputs.GHA_PAT }}" >> $GITHUB_OUTPUT
+          echo "token_type=gh_pat" >> $GITHUB_OUTPUT
+        else
+          echo "token=${{ steps.create_github_app_token.outputs.token }}" >> $GITHUB_OUTPUT
+          echo "token_type=gh_app" >> $GITHUB_OUTPUT
+        fi
+outputs:
+  token:
+    description: "The token to use to authenticate to GitHub"
+    value: ${{ steps.set_access_token.outputs.token }}
+  token_type:
+    description: "The type of the token (gh_pat or gh_app)."
+    value: ${{ steps.set_access_token.outputs.token_type }}
