@@ -1,0 +1,257 @@
+# This workflow will deploy a kustomize overlay to a kubernetes cluster.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "The name of the service"
+        required: false
+        type: string
+      service_dir:
+        description: "Relative path to the service directory"
+        required: false
+        type: string
+      overlay:
+        description: "The overlay to use for kustomize"
+        required: true
+        type: string
+      tag:
+        description: "The image tag to deploy"
+        required: true
+        type: string
+      cloud_provider_location_cluster:
+        description: "The cloud provider, location and cluster name (e.g. 'gcp/us-central1/my-cluster')"
+        required: true
+        type: string
+      deployment_repo:
+        description: "Deployment repo (org/repo, e.g. 'KoalaOps/deployment'), if different from the service repo"
+        required: false
+        type: string
+      deployment_folder_path:
+        description: "Path to the deployment folder in the repo (whether centralized or single service repo), no leading or trailing slashes"
+        required: false
+        type: string
+      deploy_config:
+        description: "JSON structured config to add or override key-values in .env files"
+        required: false
+        type: string
+      ref:
+        description: "The git ref to use"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      service_name:
+        description: "The name of the service"
+        required: false
+        type: string
+      service_dir:
+        description: "Relative path to the service directory"
+        required: false
+        type: string
+      overlay:
+        description: "The overlay to use for kustomize"
+        required: true
+        type: string
+      tag:
+        description: "The image tag to deploy"
+        required: true
+        type: string
+      cloud_provider_location_cluster:
+        description: "The cloud provider, location and cluster name (e.g. 'gcp/us-central1/my-cluster')"
+        required: true
+        type: string
+      deployment_repo:
+        description: "Deployment repo (org/repo, e.g. 'KoalaOps/deployment')"
+        required: false
+        type: string
+      deployment_folder_path:
+        description: "Folder path in the deployment repo, no leading or trailing slashes"
+        required: false
+        type: string
+      ref:
+        description: "The git ref to use"
+        required: false
+        type: string
+      deploy_config:
+        description: "JSON structured config to add or override key-values in .env files"
+        required: false
+        type: string
+jobs:
+  deploy:
+    permissions:
+      contents: "write"
+      id-token: "write"
+    runs-on: ubuntu-latest
+    env:
+      NAME: ${{ inputs.service_name }}
+      IMAGE: "ghcr.io/koalaops/${{ inputs.service_name }}"
+      MANAGED_BY: ""
+      IS_EXTERNAL_DEPLOYMENT_REPO: ${{ inputs.deployment_repo != '' && inputs.deployment_repo != github.repository }}
+    steps:
+      # parse the cloud_provider_location_cluster input to extract the cloud_provider, location and cluster
+      - name: Parse cloud_provider_location_cluster
+        run: |
+          CLOUD_PROVIDER=$(echo "${{ inputs.cloud_provider_location_cluster }}" | cut -d '/' -f 1)
+          LOCATION=$(echo "${{ inputs.cloud_provider_location_cluster }}" | cut -d '/' -f 2) 
+          CLUSTER=$(echo "${{ inputs.cloud_provider_location_cluster }}" | cut -d '/' -f 3)
+          echo "CLOUD_PROVIDER=$CLOUD_PROVIDER" >> $GITHUB_ENV
+          echo "LOCATION=$LOCATION" >> $GITHUB_ENV
+          echo "CLUSTER=$CLUSTER" >> $GITHUB_ENV
+
+      - name: Print inputs
+        run: |
+          echo "service_name: ${{ env.NAME }}"
+          echo "service_dir: ${{ inputs.service_dir }}"
+          echo "overlay: ${{ inputs.overlay }}"
+          echo "tag: ${{ inputs.tag }}"
+          echo "cloud_provider_location_cluster: ${{ inputs.cloud_provider_location_cluster }}"
+          echo "CLOUD_PROVIDER: ${{ env.CLOUD_PROVIDER }}"
+          echo "LOCATION: ${{ env.LOCATION }}"
+          echo "CLUSTER: ${{ env.CLUSTER }}"
+          echo "deployment_repo: ${{ inputs.deployment_repo }}"
+          echo "deployment_folder_path: ${{ inputs.deployment_folder_path }}"
+          echo "deploy_config: ${{ inputs.deploy_config }}"
+          echo "ref: ${{ inputs.ref }}"
+          echo "IS_EXTERNAL_DEPLOYMENT_REPO: ${{ env.IS_EXTERNAL_DEPLOYMENT_REPO }}"
+          ENV_FILES_CONFIG=$(echo "${{ inputs.deploy_config }}" | base64 --decode)
+          echo "ENV_FILES_CONFIG=$ENV_FILES_CONFIG" >> $GITHUB_ENV
+          echo "deploy_config: $ENV_FILES_CONFIG"
+
+      - name: Validate deployment inputs
+        run: |
+          if [ -z "$CLOUD_PROVIDER" ] || [ -z "$LOCATION" ] || [ -z "$CLUSTER" ]; then
+            echo "Error: Failed to parse cloud_provider_location_cluster"
+            exit 1
+          fi
+      - name: Checkout code for local actions
+        uses: actions/checkout@v4
+        with:
+          path: "workflows"
+          ref: ${{ inputs.ref }}
+
+      - name: Set up GitHub auth token
+        id: github-auth-token
+        uses: ./workflows/.github/actions/github-auth-token
+        with:
+          GHA_PAT: ${{ secrets.GHA_PAT }}
+          GH_APP_PK: ${{ secrets.GH_APP_PK }}
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+
+      - name: Checkout deployment repo
+        uses: actions/checkout@v4
+        with:
+          path: "deployment"
+          ref: ${{ inputs.ref }}
+          repository: ${{ inputs.deployment_repo || github.repository }}
+          token: ${{ steps.github-auth-token.outputs.token || github.token }}
+
+      # Parse the input deploy_config and add or override key-values in .env files.
+      # This allows adding or overriding values in .env files without changing the content of the files in the deploy folder.
+      # This is useful when we don't want to rely on committing files to git, such as with ephemeral environments.
+      - name: Parse deploy_config and add or override key-values
+        if: inputs.deploy_config != ''
+        working-directory: "deployment"
+        run: npx extend-env-files
+
+      # Determine the deployment directory based on the input variables (deployment_repo, deployment_folder_path, overlay)
+      - name: Set DEPLOY_DIR
+        working-directory: "deployment"
+        run: |
+          if [ "${{ env.IS_EXTERNAL_DEPLOYMENT_REPO }}" = "true" ]; then
+            DEPLOY_DIR="${{ inputs.deployment_folder_path }}/deploy/overlays/${{ inputs.overlay }}"
+          elif [ -n "${{ inputs.service_dir }}" ]; then
+            DEPLOY_DIR="${{ inputs.service_dir }}/deploy/overlays/${{ inputs.overlay }}"
+          else
+            DEPLOY_DIR="deploy/overlays/${{ inputs.overlay }}"
+          fi
+          echo "DEPLOY_DIR=$DEPLOY_DIR" >> $GITHUB_ENV
+
+      # Verify input overlay exists in repo
+      - name: Verify input overlay exists in repo
+        working-directory: "deployment"
+        run: |
+          if [ ! -f "$DEPLOY_DIR/kustomization.yaml" ]; then
+            echo "Error: Input overlay '$DEPLOY_DIR' does not exist in repo"
+            exit 1
+          fi
+
+      # Update the image tag and version label in the kustomize overlay
+      - name: Update image tag in Kustomize overlay
+        working-directory: "deployment"
+        run: |-
+          cd $DEPLOY_DIR
+          kustomize edit set image $IMAGE:${{ inputs.tag }}
+          sed -i "s/app.kubernetes.io\/version:.*/app.kubernetes.io\/version: ${{ inputs.tag }}/g" kustomization.yaml
+          kustomize edit set annotation last-deployed-by:${{ github.actor }}
+          BUILD_RESULT=$(kustomize build)
+          NAMESPACE=$(echo "$BUILD_RESULT" | grep -m 1 namespace: | cut -d ":" -f 2 | tr -d '[:space:]')
+          FULLNAME="$NAME"
+          echo "NAMESPACE: $NAMESPACE"
+          echo "FULLNAME: $FULLNAME"
+          echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+          echo "FULLNAME=$FULLNAME" >> $GITHUB_ENV
+
+      # Determine which tool is managing the deployment, if any.
+      # Look for the "app.kubernetes.io/managed-by" label in the kustomize output. Limit grep to 1 line to avoid multiple matches.
+      - name: Check for "managed-by" label
+        id: check-managed-by-label
+        working-directory: "deployment"
+        run: |-
+          BUILD_RESULT=$(kustomize build $DEPLOY_DIR)
+          MANAGED_BY=$(echo "$BUILD_RESULT" | grep app.kubernetes.io/managed-by: | head -n 1 | cut -d ":" -f 2 | tr -d '[:space:]')
+          echo "BUILD_RESULT=$BUILD_RESULT"
+          echo "MANAGED_BY=$MANAGED_BY" >> $GITHUB_ENV
+
+      # If using GitOps with ArgoCD, push the new tag to the repo and allow ArgoCD to handle deployment
+      - name: Push new tag to repo
+        if: env.MANAGED_BY == 'argocd'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          repository: "deployment"
+          commit_message: Update env '${{ inputs.overlay }}' to version '${{ inputs.tag }}' [skip ci]
+          commit_user_name: GitHub Actions Bot
+          file_pattern: ${{ env.DEPLOY_DIR }}
+
+      # If not using GitOps with ArgoCD, authenticate to GCP and get the GKE credentials
+      - name: Login to GCP
+        if: env.MANAGED_BY != 'argocd' && env.CLOUD_PROVIDER == 'gcp'
+        uses: "google-github-actions/auth@v2"
+        with:
+          credentials_json: "${{ secrets.GCP_CREDENTIALS }}"
+      - name: Set up GKE credentials
+        if: env.MANAGED_BY != 'argocd' && env.CLOUD_PROVIDER == 'gcp'
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.LOCATION }}
+
+      # If not using GitOps with ArgoCD, authenticate to AWS and get the EKS credentials
+      - name: Login to AWS
+        if: env.MANAGED_BY != 'argocd' && env.CLOUD_PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:  ${{ env.LOCATION }}
+          role-duration-seconds: 1200
+          role-session-name: GithubActions-${{ github.run_id }}
+      - name: Set up EKS credentials and context
+        if: env.MANAGED_BY != 'argocd' && env.CLOUD_PROVIDER == 'aws'
+        run: |
+          aws eks --region ${{ env.LOCATION }} update-kubeconfig --name ${{ env.CLUSTER }}
+          CONTEXT=arn:aws:eks:${{ env.LOCATION }}:$(aws sts get-caller-identity --query "Account" --output text):cluster/${{ env.CLUSTER }}
+          kubectl config use-context $CONTEXT      
+
+      # If not using GitOps with ArgoCD, deploy the overlay to the cluster using kubectl
+      - name: Deploy overlay to cluster
+        if: env.MANAGED_BY != 'argocd'
+        working-directory: "deployment"
+        run: |-
+          echo "Using kubectl to deploy new tag '${{ inputs.tag }}' to cluster in env '${{ inputs.overlay }}'"
+          kubectl create namespace $NAMESPACE 2>/dev/null || true
+          kubectl kustomize $DEPLOY_DIR | kubectl apply -f -
+          kubectl rollout status deployment/$NAME -n $NAMESPACE --timeout=120s
+          kubectl describe deployments -l app=$NAME -n $NAMESPACE

@@ -1,0 +1,55 @@
+# This workflow is the primary CI workflow for the project.
+# It is triggered on every push to the main branch and on every pull request to the  main branch.
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/about-continuous-integration
+
+name: Build & Test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ main]
+  pull_request:
+    branches: [ main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up toolchain
+        run: echo "Setting up toolchain (replace with your own command here)";
+        # Replace with the toolchain you need for your project
+        # Example for simple Go project:
+        # uses: actions/setup-go@v5
+        # with:
+        #   go-version: "1.22"
+
+      # Install dependencies
+      - name: Install dependencies
+        run: echo "Installing dependencies (replace with your own command here)";
+        # Replace with the command you need to install your dependencies
+        # Example for simple Go project:
+        # run: |
+        #   go mod tidy
+        #   go get .
+
+      # Build
+      - name: Build
+        run: echo "Building (replace with your own command here)";
+        # Replace with the command you need to build your project
+        # Example for simple Go project:
+        # run: go mod tidy; go build -v ./...
+
+      # Run unit-tests
+      - name: Test
+        run: echo "Running unit-tests (replace with your own command here)";
+        # Replace with the command you need to run your unit-tests
+        # Example for simple Go project:
+        # run: go mod tidy; go test -v ./...

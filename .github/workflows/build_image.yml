@@ -1,0 +1,164 @@
+# Build container image and push to registry
+
+name: Build Image & Push to Registry
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The image tag to use"
+        required: true
+        type: string
+      ref:
+        description: "The git ref to use"
+        required: false
+        type: string
+      service_dir:
+        description: "Relative path to the service directory"
+        required: false
+        type: string
+        default: "."
+      service_name:
+        description: "The name of the service"
+        required: false
+        type: string
+    outputs:
+      tag:
+        description: "The tag used in practice. If the input tag is empty, determined by branch."
+        value: ${{ jobs.build.outputs.tag }}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The image tag to use, leave empty to use branch default"
+        required: false
+        type: string
+      ref:
+        description: "The git ref to use"
+        required: false
+        type: string
+      service_dir:
+        description: "Relative path to the service directory"
+        required: false
+        type: string
+        default: "."
+      service_name:
+        description: "The name of the service"
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: "ghcr.io/koalaops/${{ inputs.service_name }}"
+      INPUT_TAG: ${{ inputs.tag }}
+      INPUT_SERVICE_NAME: ${{ inputs.service_name }}
+      GITHUB_REF: ${{ github.ref }}
+      GITHUB_EVENT_PULL_REQUEST_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      # Prepare Docker login credentials: https://github.com/docker/login-action
+      
+      REGISTRY: ghcr.io
+      REGISTRY_USERNAME: ${{github.actor}}
+      REGISTRY_PASSWORD: ${{secrets.GITHUB_TOKEN}}
+      
+    outputs:
+      tag: ${{ steps.image_tag.outputs.tag }}
+    permissions:
+      contents: "write"
+      id-token: "write"
+      packages: "write"
+
+    steps:
+      - name: Print inputs
+        run: |
+          echo "tag: $INPUT_TAG"
+          echo "ref: ${{ inputs.ref }}"
+          echo "service_dir: ${{ inputs.service_dir }}"
+          echo "service_name: $INPUT_SERVICE_NAME"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          
+      - name: Determine image tag
+        id: image_tag
+        run: |
+          # Truncate branch name if it exceeds the max length, leaving room for date suffix.
+          # Kubernetes doesn't allow more than 63 chars for labels.
+          MAX_TAG_LENGTH=63
+          if [ -n "$INPUT_TAG" ]; then
+            TAG=$(echo "$INPUT_TAG" | tr '/:' '_')
+          else
+            if [ -n "$GITHUB_EVENT_PULL_REQUEST_HEAD_REF" ]; then
+                BRANCH="$GITHUB_EVENT_PULL_REQUEST_HEAD_REF"
+            else
+                BRANCH=$(echo "$GITHUB_REF" | sed 's#refs/heads/##')
+            fi
+            echo "Original Branch Name: $BRANCH"
+            BRANCH=$(echo "$BRANCH" | tr '/' '_')
+
+            DATE=$(date +'%Y-%m-%d')
+            TAG=${INPUT_SERVICE_NAME}_${DATE}_${BRANCH}
+
+            # Truncate tag if it exceeds the max length, leaving room for counter suffix.
+            if [ ${#TAG} -gt $((MAX_TAG_LENGTH - 3)) ]; then
+              TAG=${TAG:0:$((MAX_TAG_LENGTH - 3))}
+              echo "Truncated Tag: $TAG"
+            fi
+
+            # Count number of tags that match the truncated tag, ensure 2 digits and append to tag.
+            COUNTER=$(git ls-remote --tags | grep "$TAG" | wc -l | tr -d ' ')
+            COUNTER=$(printf "%02d" $COUNTER)
+            TAG=${TAG}_${COUNTER}
+          fi
+          
+          echo "Tag: $TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          COMMIT_HASH=$(git rev-parse HEAD)
+          echo "commit_hash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/build
+        name: Build
+        with:
+          service_dir: ${{ inputs.service_dir }}
+          service_name: ${{ inputs.service_name }}
+        
+      
+      
+      - name: Login to Docker registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ env.REGISTRY_PASSWORD }}      
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build & Tag using build-push-action with caching
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.service_dir || '.' }}
+          # Uncomment and update if the Dockerfile is not in the root of the service directory (inputs.service_dir), or if it's not named Dockerfile
+          # file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ env.TAG }}
+          # Uncomment if the Docker build needs to authenticate to another private repository
+          # secrets: |
+          #   GIT_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          build-args: |
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create git tag
+        id: create_git_tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          commit_sha: ${{ inputs.ref }}
+          custom_tag: ${{ env.TAG }}
+          tag_prefix: ""

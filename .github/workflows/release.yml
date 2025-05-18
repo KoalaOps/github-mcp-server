@@ -1,0 +1,76 @@
+# Create a new Release.
+
+# This workflow will update tag/version, build and push a Docker container to the container registry.
+# If configured to auto-deploy, it will also deploy the new version to the cluster.
+name: Release
+
+#  Prevent concurrent runs on the same branch/tag ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+jobs:
+  image_tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.image_tag.outputs.tag }}
+      commit_hash: ${{ steps.image_tag.outputs.commit_hash }}
+    permissions:
+      contents: "write"
+      id-token: "write"
+    steps:
+      - uses: actions/checkout@v4
+        
+      - name: Determine image tag
+        id: image_tag
+        run: |
+          COMMIT_HASH=$(git rev-parse HEAD)
+          BRANCH=$(echo "${{ github.ref }}" | sed 's#refs/heads/##')
+          BRANCH=$(echo $BRANCH | tr '/' '-')
+          DATE=$(date +'%Y-%m-%d')
+          TAG=${DATE}_${BRANCH}
+
+          echo "Commit Hash: $COMMIT_HASH"
+          echo "Branch Name: $BRANCH"
+          echo "Date: $DATE"
+          echo "Base Tag: $TAG"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "commit_hash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
+
+
+  build:
+    uses: ./.github/workflows/build_image.yml
+    needs: image_tag
+    permissions:
+      contents: "write"
+      id-token: "write"
+      packages: "write"
+    with:
+      service_name: github-mcp-server
+      ref: ${{ needs.image_tag.outputs.commit_hash }}
+      tag: ${{ needs.image_tag.outputs.tag }}
+    secrets: inherit
+
+  # Deploy the new version to the cluster
+
+  deploy:
+    needs: [image_tag, build]
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    permissions:
+      contents: "write"
+      id-token: "write"
+    with:
+      ref: ${{ github.ref }}
+      tag: ${{ needs.image_tag.outputs.tag }}
+      service_name: github-mcp-server
+      overlay: dev
+      cloud_provider_location_cluster: gcp/us-east1-b/nonprod-cluster-us-east1
+      deployment_repo: KoalaOps/deployment
+      deployment_folder_path: github-mcp-server
+

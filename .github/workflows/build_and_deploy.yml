@@ -1,0 +1,81 @@
+# Build image, push to container registry and deploy to the requested env/cluster.
+
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "The name of the service"
+        required: false
+        type: string
+      overlay:
+        description: "The overlay to use for Kustomize"
+        required: true
+        type: string
+      tag:
+        description: "The image tag to use, leave empty to use branch default"
+        required: false
+        type: string
+      cloud_provider_location_cluster:
+        description: "The cloud provider, location and cluster name (e.g. 'gcp/us-central1/my-cluster')"
+        required: true
+        type: string
+      deployment_repo:
+        description: "Deployment repo (org/repo, e.g. 'KoalaOps/deployment')"
+        required: false
+        type: string
+      deployment_folder_path:
+        description: "Path to the deployment folder in the repo (whether centralized or single service repo), no leading or trailing slashes"
+        required: false
+        type: string
+      deploy_config:
+        description: 'Inline configuration in YAML format'
+        required: false
+        type: string
+      deployment_ref:
+        description: "The branch or tag to use for the deployment configuration files such as Deployment Manifests, Env vars, etc."
+        required: false
+        type: string 
+      ref:
+        description: "The branch or tag to use for the service code that the image is built from"
+        required: false
+        type: string  
+      service_dir:
+        description: "Relative path to the service directory"
+        required: false
+        type: string
+        default: "."
+
+jobs:
+  build:
+    uses: ./.github/workflows/build_image.yml
+    permissions:
+      contents: "write"
+      id-token: "write"
+      packages: "write"
+    with:
+      tag: ${{ inputs.tag }}
+      service_dir: ${{ inputs.service_dir }}
+      service_name: ${{ inputs.service_name }}
+      ref: ${{ inputs.ref }}
+    secrets: inherit
+
+  deploy:
+    # Deploy the new version to the cluster
+    uses: ./.github/workflows/deploy.yml
+    needs: build
+    permissions:
+      contents: "write"
+      id-token: "write"
+    with:
+      service_name: ${{ inputs.service_name }}
+      overlay: ${{ inputs.overlay }}
+      service_dir: ${{ inputs.service_dir }}
+      tag: ${{ needs.build.outputs.tag }}
+      cloud_provider_location_cluster: ${{ inputs.cloud_provider_location_cluster }}
+      deploy_config: ${{ inputs.deploy_config }}
+      deployment_repo: ${{ inputs.deployment_repo }}
+      deployment_folder_path: ${{ inputs.deployment_folder_path }}
+      ref: ${{ inputs.deployment_branch }}
+    secrets: inherit
