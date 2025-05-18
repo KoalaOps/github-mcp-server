@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NAME: ${{ inputs.service_name }}
-      IMAGE: "ghcr.io/koalaops/${{ inputs.service_name }}"
+      IMAGE: "me-west1-docker.pkg.dev/koalabackend/koala-repo/${{ inputs.service_name }}"
       MANAGED_BY: ""
       IS_EXTERNAL_DEPLOYMENT_REPO: ${{ inputs.deployment_repo != '' && inputs.deployment_repo != github.repository }}
     steps:

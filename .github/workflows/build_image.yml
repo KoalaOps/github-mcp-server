@@ -50,7 +50,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      IMAGE: "ghcr.io/koalaops/${{ inputs.service_name }}"
+      IMAGE: "me-west1-docker.pkg.dev/koalabackend/koala-repo/${{ inputs.service_name }}"
       INPUT_TAG: ${{ inputs.tag }}
       INPUT_SERVICE_NAME: ${{ inputs.service_name }}
       GITHUB_REF: ${{ github.ref }}
