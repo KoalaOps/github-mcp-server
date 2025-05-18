@@ -1,0 +1,14 @@
+# Stage 1: Build the adapter
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/adapter/main.go ./cmd/adapter/
+RUN CGO_ENABLED=0 GOOS=linux go build -o /adapter ./cmd/adapter/main.go
+
+# Stage 2: Create the runtime image
+FROM alpine:latest
+RUN apk add --no-cache netcat-openbsd
+COPY --from=builder /adapter /adapter
+# adapter-config.json is no longer copied as config comes from env vars
+ENTRYPOINT ["/adapter"] 

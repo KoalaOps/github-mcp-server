@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MCP SSE Test</title>
+    <style>
+        body { font-family: monospace; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #events { 
+            background-color: #f5f5f5; 
+            padding: 10px; 
+            border-radius: 5px;
+            height: 500px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .event { margin-bottom: 10px; }
+        .event-data { color: #0066cc; }
+    </style>
+</head>
+<body>
+    <h1>MCP Server SSE Test</h1>
+    <div>
+        <button id="connect">Connect to SSE</button>
+        <button id="disconnect" disabled>Disconnect</button>
+    </div>
+    <h3>Events:</h3>
+    <div id="events"></div>
+
+    <script>
+        let eventSource = null;
+        const eventsContainer = document.getElementById('events');
+        const connectBtn = document.getElementById('connect');
+        const disconnectBtn = document.getElementById('disconnect');
+
+        function appendEvent(text) {
+            const eventElement = document.createElement('div');
+            eventElement.className = 'event';
+            eventElement.innerHTML = `<span class="event-time">[${new Date().toISOString()}]</span> <span class="event-data">${escapeHtml(text)}</span>`;
+            eventsContainer.appendChild(eventElement);
+            eventsContainer.scrollTop = eventsContainer.scrollHeight;
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function formatJSON(jsonString) {
+            try {
+                const obj = JSON.parse(jsonString);
+                return JSON.stringify(obj, null, 2);
+            } catch (e) {
+                return jsonString;
+            }
+        }
+
+        connectBtn.addEventListener('click', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            appendEvent('Connecting to SSE endpoint...');
+            eventSource = new EventSource('http://localhost:8080/mcp');
+            
+            eventSource.onopen = () => {
+                appendEvent('Connection established');
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            };
+            
+            eventSource.onmessage = (event) => {
+                appendEvent(`Received data: ${formatJSON(event.data)}`);
+            };
+            
+            eventSource.onerror = (error) => {
+                appendEvent(`Error: Connection failed or closed`);
+                eventSource.close();
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            };
+        });
+        
+        disconnectBtn.addEventListener('click', () => {
+            if (eventSource) {
+                appendEvent('Disconnecting...');
+                eventSource.close();
+                eventSource = null;
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        });
+    </script>
+</body>
+</html> 

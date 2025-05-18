@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-server-compose
+    networks:
+      - mcp-network
+    environment:
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN} # Pass the token directly to the server
+    # No ports exposed to host for mcp-server, it's accessed by adapter via mcp-network
+
+  mcp-adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile.adapter
+    ports:
+      - "8080:8080"
+    environment:
+      - MCP_COMMAND=nc # netcat is available in Dockerfile.adapter
+      - MCP_ARGS=mcp-server,9000
+      - MCP_ENV_GITHUB_TOKEN=${GITHUB_TOKEN} # Resolved from .env file
+    depends_on:
+      - mcp-server
+    networks:
+      - mcp-network
+
+# Remove the mcp-server-bin volume as it's no longer used for binary extraction
+# volumes:
+#   mcp-server-bin:
+
+networks:
+  mcp-network:
+    driver: bridge 
