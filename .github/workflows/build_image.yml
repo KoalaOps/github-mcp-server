@@ -57,9 +57,9 @@ jobs:
       GITHUB_EVENT_PULL_REQUEST_HEAD_REF: ${{ github.event.pull_request.head.ref }}
       # Prepare Docker login credentials: https://github.com/docker/login-action
       
-      REGISTRY: ghcr.io
-      REGISTRY_USERNAME: ${{github.actor}}
-      REGISTRY_PASSWORD: ${{secrets.GITHUB_TOKEN}}
+      REGISTRY: me-west1-docker.pkg.dev
+      REGISTRY_USERNAME: _json_key
+      REGISTRY_PASSWORD: ${{ secrets.GCP_CREDENTIALS }}
       
     outputs:
       tag: ${{ steps.image_tag.outputs.tag }}
